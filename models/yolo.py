@@ -25,6 +25,8 @@ except ImportError:
 class Detect(nn.Module):
     stride = None  # strides computed during build
     export = False  # onnx export
+    onnx_dynamic = False
+    end2end = False
 
     def __init__(self, nc=80, anchors=(), nkpt=None, ch=(), inplace=True, dw_conv_kpt=False):  # detection layer
         super(Detect, self).__init__()
@@ -56,7 +58,7 @@ class Detect(nn.Module):
 
         self.inplace = inplace  # use in-place ops (e.g. slice assignment)
 
-    def forward(self, x):
+    def forward_old(self, x):
         # x = x.copy()  # for profiling
         z = []  # inference output
         self.training |= self.export
@@ -102,6 +104,61 @@ class Detect(nn.Module):
                 z.append(y.view(bs, -1, self.no))
 
         return x if self.training else (torch.cat(z, 1), x)
+
+    def forward(self, x):
+        # x = x.copy()  # for profiling
+        z = []  # inference output
+        # print(f'inplace: {self.inplace}')
+        for i in range(self.nl):
+            x[i] = torch.cat((self.m[i](x[i]), self.m_kpt[i](x[i])), axis=1)
+
+            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+            x_det = x[i][..., :6]
+            x_kpt = x[i][..., 6:]
+
+            if not self.training:  # inference
+                if self.onnx_dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]: # onnx_dynamic export
+                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
+                kpt_grid_x = self.grid[i][..., 0:1]
+                kpt_grid_y = self.grid[i][..., 1:2]
+
+                y = x_det.sigmoid()
+
+                if self.inplace:
+                    xy = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
+                    wh = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i].view(1, self.na, 1, 1, 2) # wh
+                    if self.nkpt != 0:
+                        x_kpt[..., 0::3] = (x_kpt[..., ::3] * 2. - 0.5 + kpt_grid_x.repeat(1,1,1,1,17)) * self.stride[i]  # xy
+                        x_kpt[..., 1::3] = (x_kpt[..., 1::3] * 2. - 0.5 + kpt_grid_y.repeat(1,1,1,1,17)) * self.stride[i]  # xy
+                        x_kpt[..., 2::3] = x_kpt[..., 2::3].sigmoid()
+
+                    y = torch.cat((xy, wh, y[..., 4:], x_kpt), dim = -1)
+
+                else:  
+                    xy = (y[..., 0:2] * 2. - 0.5 + self.grid[i]) * self.stride[i]  # xy
+                    wh = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i].view(1, self.na, 1, 1, 2) # wh
+                    
+                    kpts_x = (x_kpt[..., ::3] * 2. - 0.5 + kpt_grid_x.repeat(1,1,1,1,17)) * self.stride[i]  # xy
+                    kpts_y = (x_kpt[..., 1::3] * 2. - 0.5 + kpt_grid_y.repeat(1,1,1,1,17)) * self.stride[i]  # xy
+                    kpts_c = x_kpt[..., 2::3].sigmoid()
+
+                    kpts = torch.stack([kpts_x,kpts_y,kpts_c],dim=-1).view(bs,self.na,ny,nx,51)
+                    y = torch.cat((xy, wh, y[..., 4:], kpts), dim = -1)
+
+                z.append(y.view(bs, -1, self.no))
+        if self.training:
+            out = x
+        elif self.end2end:
+            out = torch.cat(z, 1)
+        elif self.export:
+            out = (torch.cat(z, 1), )
+        else:
+            out = (torch.cat(z, 1), x)
+
+        # return x if self.training else (torch.cat(z, 1),) if self.export else (torch.cat(z, 1), x)
+        return out
+
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
