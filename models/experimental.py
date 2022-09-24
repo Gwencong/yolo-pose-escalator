@@ -134,3 +134,137 @@ def attempt_load(weights, map_location=None, inplace=True):
         for k in ['names', 'stride']:
             setattr(model, k, getattr(model[-1], k))
         return model  # return ensemble
+
+
+##################################################
+
+def xywh2xyxy(x):
+    # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
+    x1 = x[..., 0] - x[..., 2] / 2  # top left x
+    y1 = x[..., 1] - x[..., 3] / 2  # top left y
+    x2 = x[..., 0] + x[..., 2] / 2  # bottom right x
+    y2 = x[..., 1] + x[..., 3] / 2  # bottom right y
+    y = torch.stack([x1,y1,x2,y2],dim=-1)
+    return y
+
+class TRT_NMS(torch.autograd.Function):
+    '''TensorRT NMS operation'''
+    @staticmethod
+    def forward(
+        ctx,
+        boxes,
+        scores,
+        score_threshold=0.25,
+        iou_threshold=0.45,
+        max_output_boxes_per_class=100,
+        center_point_box=1,
+        plugin_version="1",
+    ):
+        batch_size, num_classes, num_boxes = scores.shape
+        selected_indices = torch.randint(0, max_output_boxes_per_class, (max_output_boxes_per_class, 3), dtype=torch.long)
+        return selected_indices
+
+    @staticmethod
+    def symbolic(g,
+                 boxes,
+                 scores,
+                 score_threshold=0.25,
+                 iou_threshold=0.45,
+                 max_output_boxes_per_class=100,
+                 center_point_box=1,
+                 plugin_version="1"):
+        out = g.op("TRT::EfficientNMS_ONNX_TRT",
+                   boxes,
+                   scores,
+                   score_threshold_f=score_threshold,
+                   iou_threshold_f=iou_threshold,
+                   max_output_boxes_per_class_i=max_output_boxes_per_class,
+                   center_point_box_i=center_point_box,
+                   plugin_version_s=plugin_version,
+                   outputs=1)
+        selected_indices = out
+        return selected_indices
+
+
+
+class ONNX_TRT(nn.Module):
+    '''onnx module with TensorRT NMS operation.'''
+    def __init__(self, max_obj=100, iou_thres=0.45, score_thres=0.25 ,device=None):
+        super().__init__()
+        self.device = device if device else torch.device('cpu')
+        
+        self.score_threshold = score_thres
+        self.iou_threshold = iou_thres
+        self.max_output_boxes_per_class = max_obj
+        self.center_point_box = 1,
+        self.plugin_version = '1'
+
+        
+
+    def forward(self, x):
+        bs = x.shape[0]
+        boxes = x[:, :, :4]
+        conf = x[:, :, 4]
+        scores = x[:, :, 5]
+        scores *= conf
+        scores = scores.unsqueeze(2)
+        selected_indices = TRT_NMS.apply(boxes, scores, self.score_threshold,
+                                         self.iou_threshold, self.max_output_boxes_per_class,
+                                         self.center_point_box, self.plugin_version )
+        batch_index, class_index, box_index = selected_indices[:,0],selected_indices[:,1],selected_indices[:,2]
+        nmsed_indices = selected_indices.repeat(bs,1,1)
+        nmsed_boxes = boxes[:,box_index,:]
+        nmsed_poses = x[:,box_index,6:]
+        nmsed_scores = scores[:,box_index,:]
+        return nmsed_indices,nmsed_boxes,nmsed_poses,nmsed_scores
+        # return selected_indices
+
+
+class ONNX_TRT_v2(nn.Module):
+    '''onnx module with TensorRT NMS operation. Just support batch size 1.'''
+    def __init__(self, max_obj=100, iou_thres=0.45, score_thres=0.25 ,device=None):
+        super().__init__()
+        self.device = device if device else torch.device('cpu')
+        
+        self.score_threshold = score_thres
+        self.iou_threshold = iou_thres
+        self.max_output_boxes_per_class = max_obj
+        self.center_point_box = 1,
+        self.plugin_version = '1'
+
+        
+    def forward(self, x):
+        bs = x.shape[0]
+        boxes = x[:, :, :4]
+        conf = x[:, :, 4]
+        scores = x[:, :, 5]
+        scores *= conf
+        scores = scores.unsqueeze(2)
+        selected_indices = TRT_NMS.apply(boxes, scores, self.score_threshold,
+                                         self.iou_threshold, self.max_output_boxes_per_class,
+                                         self.center_point_box, self.plugin_version )
+        box_index = selected_indices[:,2]
+        nmsed_indices = selected_indices.repeat(bs,1,1) # [1,100,3]
+        nmsed_boxes = boxes[:,box_index,:]              # [1,100,4]
+        nmsed_boxes = xywh2xyxy(nmsed_boxes)
+        nmsed_poses = x[:,box_index,6:]                 # [1,100,51]
+        nmsed_scores = scores[:,box_index,:]            # [1,100,1]
+        return nmsed_indices,nmsed_boxes,nmsed_poses,nmsed_scores
+        
+
+
+class End2End(nn.Module):
+    '''export onnx or tensorrt model with NMS operation.'''
+    def __init__(self, model, max_obj=100, iou_thres=0.45, score_thres=0.25, device=None):
+        super().__init__()
+        device = device if device else torch.device('cpu')
+        self.model = model.to(device)
+        self.model.model[-1].end2end = True
+        self.patch_model = ONNX_TRT
+        self.end2end = self.patch_model(max_obj, iou_thres, score_thres, device)
+        self.end2end.eval()
+
+    def forward(self, x):
+        x = self.model(x)
+        x = self.end2end(x)
+        return x
