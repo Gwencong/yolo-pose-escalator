@@ -253,3 +253,5 @@ fabric.properties
 
 # others
 checkpoints/
+weights/
+z.py
