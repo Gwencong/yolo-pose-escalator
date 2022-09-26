@@ -5,12 +5,12 @@ python test.py \
     --task val \
     --batch-size 32 \
     --img-size 832 \
-    --device 1 \
+    --device 2 \
     --kpt-label
 
 # test custom data
 python test.py \
-    --weights runs/fintune/exp/weights/best.pt \
+    --weights runs/finetune/exp3/weights/best.pt \
     --data data/custom_kpts.yaml \
     --task test \
     --batch-size 32 \

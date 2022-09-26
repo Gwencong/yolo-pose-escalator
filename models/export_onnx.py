@@ -4,11 +4,13 @@ Usage:
     $ export PYTHONPATH="$PWD" && python models/export.py --weights yolov5s.pt --img 640 --batch 1
 """
 
-import argparse
 import sys
 import time
-from pathlib import Path
+import warnings
+import argparse
 import traceback
+from pathlib import Path
+
 
 sys.path.append(Path(__file__).parent.parent.absolute().__str__())  # to run '$ python *.py' files in subdirectories
 
@@ -33,13 +35,14 @@ def get_node_num(path,model=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='weights/yolov5s6_pose_640_ti_lite.pt', help='weights path')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='image size')  # height, width
+    parser.add_argument('--weights', type=str, default='weights/yolov5l6_pose.pt', help='weights path')
+    parser.add_argument('--img-size', nargs='+', type=int, default=[832, 832], help='image size')  # height, width
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--dynamic', action='store_true', help='dynamic ONNX axes')  # ONNX-only
-    parser.add_argument('--simplify', default=True, help='simplify ONNX model')  # ONNX-only
-    parser.add_argument('--end2end', default=False,action='store_true', help='simplify ONNX model')  # ONNX-only
+    parser.add_argument('--half', action='store_true', help='FP16 precision')  # ONNX-only
+    parser.add_argument('--simplify', action='store_true', help='simplify ONNX model')  # ONNX-only
+    parser.add_argument('--end2end', action='store_true', help='simplify ONNX model')  # ONNX-only
     parser.add_argument('--topk-all', type=int, default=100, help='topk objects for every images')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='iou threshold for NMS')
     parser.add_argument('--conf-thres', type=float, default=0.5, help='conf threshold for NMS')
@@ -70,13 +73,17 @@ if __name__ == '__main__':
                 m.act = Hardswish()
             elif isinstance(m.act, nn.SiLU):
                 m.act = SiLU()
-
+     
     model.eval()
     model.model[-1].export = True
     model.model[-1].onnx_dynamic = opt.dynamic
     model.model[-1].inplace = False
     model.model[-1].end2end = opt.end2end
+    model = model.to(device)
 
+    if opt.half:
+        img = img.half()
+        model = model.half()
 
     for _ in range(2):
         y = model(img)  # dry runs
@@ -95,11 +102,19 @@ if __name__ == '__main__':
     # ONNX export ------------------------------------------------------------------------------------------------------
     prefix = colorstr('ONNX:')
     try:
+        warnings.filterwarnings(action='ignore', category=torch.jit.TracerWarning)  # suppress TracerWarning
+
         import onnx
         print(f'{prefix} starting export with onnx {onnx.__version__}...')
         f = opt.weights.replace('.pt', '.onnx')  # filename
-        torch.onnx.export(model, img, f, verbose=False, opset_version=11, input_names=input_names, output_names=output_names,
-                            dynamic_axes={'input': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
+        if opt.end2end:
+            f = f.replace('.onnx', '-NMS.onnx')
+        if opt.dynamic:
+            f = f.replace('.onnx', '-dynamic.onnx')
+        torch.onnx.export(model, img, f, verbose=False, opset_version=11, 
+                          input_names=input_names, output_names=output_names,
+                          do_constant_folding=True if device.type == 'cpu' else False,
+                          dynamic_axes={'input': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
                                         'output': {0: 'batch', 2: 'y', 3: 'x'}} if opt.dynamic else None)
 
         # Checks
@@ -123,7 +138,6 @@ if __name__ == '__main__':
 
                 print(f'{prefix} simplifying with onnx-simplifier {onnxsim.__version__}...')
                 model_onnx, check = onnxsim.simplify(model_onnx,
-                                                     dynamic_input_shape=opt.dynamic,
                                                      test_input_shapes={'input': list(img.shape)} if opt.dynamic else None)
                 assert check, 'assert check failed'
                 onnx.save(model_onnx, f)
