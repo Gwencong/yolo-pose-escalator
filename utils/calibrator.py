@@ -91,9 +91,8 @@ class MinMaxCalibrator_torch(trt.IInt8MinMaxCalibrator):
         for i in range(self.shape[0]):
             img = cv2.imread(imageList[i])
             if self.letterbox:
-                img = letterbox(img,new_shape=self.shape[2:],auto=False,stride=64)[0]
-            else:
-                img = cv2.resize(img,dsize=(self.shape[2],self.shape[3]),interpolation=cv2.INTER_LINEAR)
+                img = letterbox(img,new_shape=self.shape[2:],auto=True,stride=32)[0]
+            img = cv2.resize(img,dsize=(self.shape[2],self.shape[3]),interpolation=cv2.INTER_LINEAR)
             img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
             img = np.ascontiguousarray(img)
             img = img/255.0
@@ -178,9 +177,8 @@ class EntropyCalibrator_torch(trt.IInt8EntropyCalibrator2):
         for i in range(self.shape[0]):
             img = cv2.imread(imageList[i])
             if self.letterbox:
-                img = letterbox(img,new_shape=self.shape[2:],auto=False,stride=64)[0]
-            else:
-                img = cv2.resize(img,dsize=(self.shape[2],self.shape[3]),interpolation=cv2.INTER_LINEAR)
+                img = letterbox(img,new_shape=self.shape[2:],auto=True,stride=64)[0]
+            img = cv2.resize(img,dsize=(self.shape[2],self.shape[3]),interpolation=cv2.INTER_LINEAR)
             img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
             img = np.ascontiguousarray(img)
             img = img/255.0
