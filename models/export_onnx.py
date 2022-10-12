@@ -80,7 +80,6 @@ if __name__ == '__main__':
     model.model[-1].inplace = False
     model.model[-1].end2end = opt.end2end
     model.model[-1].fp16 = opt.half
-    model = model.to(device)
 
     for _ in range(2):
         y = model(img)  # dry runs
@@ -96,6 +95,8 @@ if __name__ == '__main__':
     if opt.half:
         img = img.half()
         model = model.half()
+
+    model = model.to(device)
     
     print(f"\n{colorstr('PyTorch:')} starting from {opt.weights} ({file_size(opt.weights):.1f} MB)")
 
