@@ -27,6 +27,7 @@ class Detect(nn.Module):
     export = False  # onnx export
     onnx_dynamic = False
     end2end = False
+    fp16 = False
 
     def __init__(self, nc=80, anchors=(), nkpt=None, ch=(), inplace=True, dw_conv_kpt=False):  # detection layer
         super(Detect, self).__init__()
@@ -120,6 +121,8 @@ class Detect(nn.Module):
             if not self.training:  # inference
                 if self.onnx_dynamic or self.grid[i].shape[2:4] != x[i].shape[2:4]: # onnx_dynamic export
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
+                    if self.fp16:
+                        self.grid[i] = self.grid[i].half()
                 kpt_grid_x = self.grid[i][..., 0:1]
                 kpt_grid_y = self.grid[i][..., 1:2]
 

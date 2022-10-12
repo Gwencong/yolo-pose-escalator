@@ -79,11 +79,7 @@ if __name__ == '__main__':
     model.model[-1].onnx_dynamic = opt.dynamic
     model.model[-1].inplace = False
     model.model[-1].end2end = opt.end2end
-    model = model.to(device)
-
-    if opt.half:
-        img = img.half()
-        model = model.half()
+    model.model[-1].fp16 = opt.half
 
     for _ in range(2):
         y = model(img)  # dry runs
@@ -95,7 +91,12 @@ if __name__ == '__main__':
         model = End2End(model,opt.topk_all,opt.iou_thres,opt.conf_thres,device)
         shapes = [opt.batch_size,opt.topk_all, 3, opt.batch_size, opt.topk_all, 4,
                     opt.batch_size, opt.topk_all, 51, opt.batch_size, opt.topk_all,1]
-        
+    
+    if opt.half:
+        img = img.half()
+        model = model.half()
+
+    model = model.to(device)
     
     print(f"\n{colorstr('PyTorch:')} starting from {opt.weights} ({file_size(opt.weights):.1f} MB)")
 
@@ -138,7 +139,7 @@ if __name__ == '__main__':
 
                 print(f'{prefix} simplifying with onnx-simplifier {onnxsim.__version__}...')
                 model_onnx, check = onnxsim.simplify(model_onnx,
-                                                     test_input_shapes={'input': list(img.shape)} if opt.dynamic else None)
+                                                     input_shapes={'input': list(img.shape)} if opt.dynamic else None)
                 assert check, 'assert check failed'
                 onnx.save(model_onnx, f)
                 nodes = model_onnx.graph.node
