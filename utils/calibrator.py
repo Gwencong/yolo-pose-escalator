@@ -68,7 +68,10 @@ class MinMaxCalibrator_torch(trt.IInt8MinMaxCalibrator):
     def get_imagesList(self,calib_path,batch_size,calib_num):
         all_images = glob.glob(os.path.join(calib_path, "*.jpg"))
         sample_num = calib_num - len(all_images)
-        if sample_num>0:
+        if len(all_images) == 0:
+            print(f'Calib: Find {len(all_images)} images, need calib cache file')
+            imageList = []
+        elif sample_num>0:
             print(f'Calib: Find {len(all_images)} images, random resampling {sample_num} images, total use {calib_num}')
             sampleList = np.random.choice(all_images, sample_num, replace=False).tolist()
             imageList = all_images + sampleList
@@ -154,7 +157,10 @@ class EntropyCalibrator_torch(trt.IInt8EntropyCalibrator2):
     def get_imagesList(self,calib_path,batch_size,calib_num):
         all_images = glob.glob(os.path.join(calib_path, "*.jpg"))
         sample_num = calib_num - len(all_images)
-        if sample_num>0:
+        if len(all_images) == 0:
+            print(f'Calib: Find {len(all_images)} images, need calib cache file')
+            imageList = []
+        elif sample_num>0:
             print(f'Calib: Find {len(all_images)} images, random resampling {sample_num} images, total use {calib_num}')
             sampleList = np.random.choice(all_images, sample_num, replace=False).tolist()
             imageList = all_images + sampleList
