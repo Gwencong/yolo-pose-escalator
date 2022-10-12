@@ -36,7 +36,7 @@ class TRT_Infer():
             self.half = True
         else:
             self.half = False
-    
+        
 
     def __call__(self, img_src, *args, **kwds):
         b,c,h,w = self.input_shape
@@ -46,6 +46,7 @@ class TRT_Infer():
             img_src = torch.from_numpy(img_src)
         else:
             img_src = img_src.half() if self.half else img_src
+            
         img = img_src.to(self.device)
         out = self.inference(img)
         if len(out)>1:
@@ -55,7 +56,7 @@ class TRT_Infer():
             nmsed_poses = nmsed_poses.reshape(b,-1,51)
             nmsed_scores = nmsed_scores.reshape(b,-1,1)
             nmsed_confes = torch.ones_like(nmsed_scores).to(nmsed_scores.device)
-            out = torch.concat([nmsed_boxes,nmsed_scores,nmsed_confes,nmsed_poses],axis=-1)
+            out = torch.cat([nmsed_boxes,nmsed_scores,nmsed_confes,nmsed_poses],axis=-1)
         else:
             out = out[0]
         out = out.reshape(b,-1,57)
@@ -194,7 +195,7 @@ class ONNX_Infer():
         img = img.astype(np.float16 if self.half else np.float32) 
         inputs = {self.input_name: img}
         outputs = self.session.run([self.output_name], inputs)
-        output = torch.from_numpy(outputs[0])
+        output = torch.from_numpy(outputs[0]).float()
         return output
 
 def load_model(weight,device,half=False,input_shape=None,fuse=True):
