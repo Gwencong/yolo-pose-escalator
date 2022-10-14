@@ -57,6 +57,8 @@ class TRT_Infer():
             nmsed_scores = nmsed_scores.reshape(b,-1,1)
             nmsed_confes = torch.ones_like(nmsed_scores).to(nmsed_scores.device)
             keep = torch.unique(nmsed_indices[...,2]).numel()
+            if torch.any(torch.isnan(nmsed_indices[...,2])) or torch.all(nmsed_indices[...,2] < 0):
+                keep = 0
             out = torch.cat([nmsed_boxes,nmsed_scores,nmsed_confes,nmsed_poses],axis=-1)
             out = out[:,:keep,:]
         else:
