@@ -40,17 +40,17 @@ python models/export_onnx.py \
 '''
 参数含义：更多释义详见代码
 python models/export_onnx.py \
-	--weights 		pytorch模型路径
-	--img-size		导出onnx模型的输入尺寸
-	--batch-size	导出onnx模型的batch size
-	--device		在cpu上导出还是在gpu上导出
-	--dynamic		导出动态onnx模型
-	--half			导出FP16权重的onnx模型,device需为gpu
-	--simplify		使用onnx-simplifier简化模型
-	--end2end		导出含NMS的模型
-	--topk-all		NMS保留的最大box/pose数量
-	--iou-thres		NMS的iou阈值
-	--conf-thres	NMS的置信度阈值
+  --weights     pytorch模型路径
+  --img-size    导出onnx模型的输入尺寸
+  --batch-size  导出onnx模型的batch size
+  --device      在cpu上导出还是在gpu上导出
+  --dynamic     导出动态onnx模型
+  --half        导出FP16权重的onnx模型,device需为gpu
+  --simplify    使用onnx-simplifier简化模型
+  --end2end     导出含NMS的模型
+  --topk-all    NMS保留的最大box/pose数量
+  --iou-thres   NMS的iou阈值
+  --conf-thres  NMS的置信度阈值
 '''
 ```
 
