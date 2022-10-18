@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--onnx', type=str, default='weights/yolov5l6_pose_custom.onnx', help='onnx model path')
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
-    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3')
     parser.add_argument('--fp16', action='store_true', help='export fp16 model')
     parser.add_argument('--int8', action='store_true', help='export int8 model')
     parser.add_argument('--workspace', type=int, default=4, help='maximum amount of persistent scratch memory available (in GB)')

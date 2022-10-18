@@ -1,189 +1,345 @@
-# YOLO-Pose Multi-person Pose estimation model
-This repository is the official implementation of the paper ["**YOLO-Pose: Enhancing YOLO for Multi Person Pose Estimation Using Object Keypoint Similarity Loss**"](https://arxiv.org/abs/2204.06806) , accepted at Deep Learning for Efficient Computer Vision (ECV) workshop
-at CVPR 2022. This repository contains YOLOv5 based models for human pose estimation.
+# YOLO-Pose TensorRT部署
+此仓库提供了将YOLO-Pose利用TensorRT加速的相关脚本，在YOLO-Pose源代码基础上进行了添加和修改，主要内容如下：
+1. 导出onnx模型，包括FP16精度导出、带NMS的模型导出
+2. 导出TensorRT模型，包括FP16和INT8
+3. 测试和推理导出的模型，包括pytorch、onnx、TensorRT模型
+4. 处理和训练自定义数据
+5. 修改了forward函数，部署TensorRT后比优化前速度更快，修改内容见[这里](docs/add_no_inplace)
 
-This repository is based on the YOLOv5 training and assumes that all dependency for training YOLOv5 is already installed. Given below is a samle inference.
-<br/> 
-<p float="left">
-<img width="800" src="./utils/figures/AdobeStock.gif">
-</p>     
+## 1.模型导出
+### （1）导出onnx
+onnx的导出脚本为`models/export_onnx.py`，支持
+* 导出一般的动态、静态onnx模型
+* 导出带nms的模型(--end2end)
+* 导出FP16的onnx模型（--half）
 
-YOLO-Pose outperforms all other bottom-up approaches in terms of AP50 on COCO validation set as shown in the figure below:
-<br/> 
-<p float="left">
-<img width="800" src="./utils/figures/AP50_GMACS_val.png">
-</p>     
+导出带NMS的onnx模型的目的是为了导出带NMS的TensorRT模型，即把NMS这一过程集成到模型推理中。由于YOLO-Pose的输出除了box还有pose，因此插入的NMS算子要能够输出经过NMS后的box索引，以获取box对应的pose，满足此条件的TensorRT官方plugin只有EfficientNMS-ONNX，onnx和pytorch中并没有该算子，因此导出的含NMS的onnx模型只有转化为TensorRT模型后才可进行推理。导出实例如下：
+```bash
+# 导出onnx模型
+python models/export_onnx.py \
+	--weights weights/yolov5l6_pose.pt \
+	--img-size 832 \
+	--device 0 \
+	--batch-size 1 \
+	--simplify \
+	--half
 
-* Given below is a sample comparision with existing Associative Embedding based approach with HigherHRNet on a crowded sample image from COCO val2017 dataset.
+# 导出带onnx的模型
+python models/export_onnx.py \
+	--weights weights/yolov5l6_pose.pt \
+	--img-size 832 \
+	--batch-size 1 \
+	--device 0 \
+	--simplify \
+	--half \
+	--end2end \
+	--topk-all 100 \
+	--iou-thres 0.45 \
+	--conf-thres 0.5
 
- Output from YOLOv5m6-pose             |  Output from HigherHRNetW32 
-:-------------------------:|:-------------------------:
-<img width="600" src="./utils/figures/000000390555_YP.jpg"> |  <img width="600" src="./utils/figures/000000390555_AE.jpg">
-
-
-## **Datset Preparation**
-The dataset needs to be prepared in YOLO format so that the dataloader can be enhanced to read the keypoints along with the bounding box informations. This [repository](https://github.com/ultralytics/JSON2YOLO) was used with required changes to generate the dataset in the required format. 
-Please download the processed labels from [here](https://drive.google.com/file/d/1irycJwXYXmpIUlBt88BZc2YzH__Ukj6A/view?usp=sharing) . It is advised to create a new directory coco_kpts and create softlink of the directory **images** and **annotations** from coco to this directory. Keep the **downloaded labels** and the files **train2017.txt** and **val2017.txt** inside this folder coco_kpts.
-
-Expected directoys structure:
-
-```
-edgeai-yolov5
-│   README.md
-│   ...   
-│
-coco_kpts
-│   images
-│   annotations
-|   labels
-│   └─────train2017
-│       │       └───
-|       |       └───
-|       |       '
-|       |       .
-│       └─val2017
-|               └───
-|               └───
-|               .
-|               .
-|    train2017.txt
-|    val2017.txt
-
-```
-
-
-## **YOLO-Pose Models and Ckpts**.
-
-|Dataset | Model Name                                                                                                                                                                                                                                              |Input Size |GMACS  |AP[0.5:0.95]%| AP50%|Notes |
-|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------|----------|-------------|------|----- |
-|COCO    | [Yolov5s6_pose_640](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5s6_640_60p7_85p3_kpts_head_6x_dwconv_3x3_lr_0p01/weights/last.pt) |640x640    |**10.2**  |   57.5      | 84.3 | [opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5s6_640_60p7_85p3_kpts_head_6x_dwconv_3x3_lr_0p01/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5s6_640_60p7_85p3_kpts_head_6x_dwconv_3x3_lr_0p01/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5s6_960_71p6_93p1/weights/last.pt)|
-|COCO    | [Yolov5s6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5s6_960_64p8_87p4_kpts_head_6x_dwconv_3x3_lr_0p01/weights/last.pt) |960x960    |**22.8**  |   63.7      | 87.6 | [opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5s6_960_64p8_87p4_kpts_head_6x_dwconv_3x3_lr_0p01/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5s6_960_64p8_87p4_kpts_head_6x_dwconv_3x3_lr_0p01/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5s6_960_71p6_93p1/weights/last.pt)|
-|COCO    | [Yolov5m6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5m6_960_67p8_89p3_kpts_head_6x_dwconv_3x3_lr_0p01/weights/last.pt) |960x960    |**66.3**  |   67.4      | 89.1 | [opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5m6_960_67p8_89p3_kpts_head_6x_dwconv_3x3_lr_0p01/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5m6_960_67p8_89p3_kpts_head_6x_dwconv_3x3_lr_0p01/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5m6_960_74p1_93p6/weights/last.pt)|
-|COCO    | [Yolov5l6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5l6_960_69p6_90p1_kpts_head_6x_dwconv_3x3_lr_0p01/weights/last.pt) |960x960    |**145.6** |   69.4      | 90.2 | [opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5l6_960_69p6_90p1_kpts_head_6x_dwconv_3x3_lr_0p01/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/best_models/yolov5l6_960_69p6_90p1_kpts_head_6x_dwconv_3x3_lr_0p01/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5l6_960_74p7_94p0/weights/last.pt)|
-
-## **Pretrained Models and Ckpts** 
-Pretrained models for all the above models are a person detector model with a similar config. Here is a  list of all these models that were used as a pretrained model. 
-Person instances in COCO dataset having keypoint annotation are used for training and evaluation.
-
-|Dataset |Model Name                      |Input Size |GMACS  |AP[0.5:0.95]%| AP50%|Notes |
-|--------|------------------------------- |-----------|----------|-------------|------|----- |
-|COCO    |[Yolov5s6_person_640](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5s6_960_71p6_93p1/weights/last.pt)   |960x960    |**19.2**  |   71.6      | 93.1 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5s6_960_71p6_93p1/opt.yaml) , [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5s6_960_71p6_93p1/hyp.yaml)|
-|COCO    |[Yolov5m6_person_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5m6_960_74p1_93p6/weights/last.pt)   |960x960    |**58.5**  |   74.1      | 93.6 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5m6_960_74p1_93p6/opt.yaml) , [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5m6_960_74p1_93p6/hyp.yaml)|
-|COCO    |[Yolov5l6_person_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5l6_960_74p7_94p0/weights/last.pt)  |960x960  |**131.8**  |   74.7      | 94.0 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5l6_person_74p7_94p0/opt.yaml) , [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5l6_960_74p7_94p0/hyp.yaml)|
-
-One can alternatively use coco pretrained weights as well. However, the final accuracy may differ.
-
-## **Training: YOLO-Pose**
-Train a suitable model  by running the following command using a suitable pretrained ckpt from the previous section.
-
-```
-python train.py --data coco_kpts.yaml --cfg yolov5s6_kpts.yaml --weights 'path to the pre-trained ckpts' --batch-size 64 --img 960 --kpt-label
-                                      --cfg yolov5m6_kpts.yaml 
-                                      --cfg yolov5l6_kpts.yaml 
+'''
+参数含义：更多释义详见代码
+python models/export_onnx.py \
+	--weights 		pytorch模型路径
+	--img-size		导出onnx模型的输入尺寸
+	--batch-size	导出onnx模型的batch size
+	--device		在cpu上导出还是在gpu上导出
+	--dynamic		导出动态onnx模型
+	--half			导出FP16权重的onnx模型,device需为gpu
+	--simplify		使用onnx-simplifier简化模型
+	--end2end		导出含NMS的模型
+	--topk-all		NMS保留的最大box/pose数量
+	--iou-thres		NMS的iou阈值
+	--conf-thres	NMS的置信度阈值
+'''
 ```
 
+### （2）导出TensorRT模型
+导出脚本为`models/export_onnx.py`，支持导出FP16模型和INT8量化模型，也可以直接使用trtexec导出TensorRT模型
+```bash
+# export TensorRT with scripts
+python models/export_TRT.py \
+	--onnx weights/yolov5l6_pose.onnx \
+	--batch-size 1 \
+	--fp16
+	
+# export TensorRT with trtexec
+trtexec \
+	--onnx=weights/yolov5l6_pose.onnx \
+	--workspace=4096 \
+	--saveEngine=weights/yolov5l6_pose.trt \
+	--fp16
 
- TO train a model at different at input resolution of 640, run the command below:
+# export TensorRT with INT8 precision
+python models/export_TRT.py \
+	--onnx weights/yolov5l6_pose.onnx \
+	--batch-size 1 \
+	--device 0 \
+	--int8 \
+	--calib_path data/custom_kpts/images \
+	--calib_num 1024 \
+	--calib_batch 128 \
+	--calib_imgsz 832 \
+	--cache_dir caches
+	
+'''
+参数含义: 更多释义详见代码
+python models/export_TRT.py 
+	--onnx				onnx模型路径
+	--batch-size		导出TensorRT模型的batch size，只有onnx为动态模型时有效
+	--device			导出TensorRT时使用的GPU id
+	--fp16				导出FP16精度的TensorRT模型
+	--int8				导出INT8精度的TensorRT模型
+	--workspace			导出TensorRT时最多可以使用的GPU显存
+	--verbose			输出详细信息
+	--dynamic			导出动态TensorRT模型，只有在onnx模型是动态时有效
+	--calib_path		校准图片所在路径
+	--calib_num			校准图片使用数量
+	--calib_batch		校准图片batch size
+	--calib_imgsz		校准图片尺寸
+	--calib_method		校准方式，提供MinMax和Entropy两种
+	--calib_letterbox	是否进行灰边填充
+	--cache_dir			校准缓存文件保持文件夹
+'''
 ```
-python train.py --data coco_kpts.yaml --cfg yolov5s6_kpts.yaml --weights 'path to the pre-trained ckpts' --batch-size 64 --img 640 --kpt-label
+
+## 2.推理和测试导出模型精度
+代码中提供了pytorch、onnx、TensorRT模型的推理脚本和测试导出模型精度的脚本
+### （1）推理
+推理脚本为`detect_multi_backend.py`，同时支持pytorch、onnx、TensorRT模型的推理，命令如下
+```bash
+# detect with TensorRT model
+python detect_multi_backend.py \
+    --weights weights/yolov5l6_pose-FP16.trt \
+    --source data/images \
+    --device 0 \
+    --img-size 832 \
+    --kpt-label
+
+# detect with ONNX model
+python detect_multi_backend.py \
+    --weights weights/yolov5l6_pose.onnx \
+    --source data/images \
+    --device 0\
+    --img-size 832 \
+    --kpt-label
+
+# detect with Pytorch model
+python detect_multi_backend.py \
+    --weights weights/yolov5l6_pose.pt \
+    --source data/images \
+    --device 0 \
+    --img-size 832 \
+    --kpt-label
+
+## 参数比较简单，和detect.py一样，详见代码
+```
+### （2）测试
+测试脚本为`test_multi_backend.py`，同时支持pytorch、onnx、TensorRT模型的测试，测试前需要按照[准备数据](#prepare)中的步骤准备好测试集，并设置好数据配置文件的测试集路径，命令如下
+```bash
+# test TensorRT model
+python test_multi_backend.py \
+    --weights weights/yolov5l6_pose-INT8.trt \
+    --data data/coco_kpts.yaml \
+    --img-size 832 \
+    --conf-thres 0.001 \
+    --iou-thres 0.6 \
+    --task val \
+    --device 0 \
+    --kpt-label
+
+# test ONNX model
+python test_multi_backend.py \
+    --weights weights/yolov5l6_pose.onnx \
+    --data data/coco_kpts.yaml \
+    --img-size 832 \
+    --conf-thres 0.001 \
+    --iou-thres 0.6 \
+    --task val \
+    --device 0 \
+    --kpt-label
+
+# test Pytorch model
+python test_multi_backend.py \
+    --weights weights/yolov5l6_pose.pt \
+    --data data/coco_kpts.yaml \
+    --img-size 832 \
+    --conf-thres 0.001 \
+    --iou-thres 0.6 \
+    --task val \
+    --device 0 \
+    --kpt-label
+
+## 参数比较简单，和test.py一样，详见代码
 ```
 
+## 3. 算法训练
+### (1) 获取训练代码
+运行如下命令克隆训练代码，并安装训练代码的环境依赖：
+```bash
+# 1.获取训练代码（yolo-pose源码+训练脚本和数据处理脚本以及相关优化）
+git clone --recurse https://github.com/Gwencong/yolo-pose-escalator.git
 
-## **YOLOv5-ti-lite Based Models and Ckpts**
-This is a lite version of the the model as described here. These models will run efficiently on TI processors.
-
-|Dataset |Model Name                      |Input Size |GMACS  |AP[0.5:0.95]%| AP50%|Notes |
-|--------|------------------------------- |-----------|----------|-------------|------|----- |
-|COCO    |[Yolov5s6_pose_640_ti_lite](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_640_ti_lite_54p9_82p2/weights/last.pt)     |640x640    |**8.6**  |  54.9      | 82.2 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_640_ti_lite_54p9_82p2/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_640_ti_lite_54p9_82p2/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5s6_ti_lite_person_64p8_90p2/weights/last.pt)|
-|COCO    |[Yolov5s6_pose_960_ti_lite](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_960_ti_lite_59p7_85p6/weights/last.pt)     |960x960    |**19.3** |  59.7      | 85.6 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_960_ti_lite_59p7_85p6/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_960_ti_lite_59p7_85p6/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5s6_ti_lite_person_64p8_90p2/weights/last.pt)|
-|COCO    |[Yolov5s6_pose_1280_ti_lite](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_1280_ti_lite_60p9_85p9/weights/last.pt)   |1280x1280  |**34.4** |  60.9      | 85.9 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_1280_ti_lite_60p9_85p9/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5s6_1280_ti_lite_60p9_85p9/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5s6_ti_lite_person_64p8_90p2/weights/last.pt)|
-|COCO    |[Yolov5m6_pose_640_ti_lite](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5m6_640_ti_lite_60p5_86p8/weights/best.pt)     |640x640    |**26.1** |  60.5      | 86.8 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5m6_640_ti_lite_60p5_86p8/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5m6_640_ti_lite_60p5_86p8/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5m6_ti_lite_person_71p4_93p1/weights/last.pt)|
-|COCO    |[Yolov5m6_pose_960_ti_lite](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5m6_960_ti_lite_65p9_88p6/weights/last.pt)     |960x960    |**58.7** |  65.9      | 88.6 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5m6_960_ti_lite_65p9_88p6/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/yolov5m6_960_ti_lite_65p9_88p6/hyp.yaml), [pretrained_weights](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/person_detector/yolov5m6_ti_lite_person_71p4_93p1/weights/last.pt)|
-
-## **Training: YOLO-Pose-ti-lite**
-Train a suitable model  by running the following command:
-
+# 2.安装环境依赖
+cd yolo-pose-escalator & pip install -r requirements.txt
 ```
-python train.py --data coco_kpts.yaml --cfg yolov5s6_kpts_ti_lite.yaml --weights 'path to the pre-trained ckpts' --batch-size 64 --img 960 --kpt-label --hyp hyp.scratch_lite.yaml
-                                      --cfg yolov5m6_kpts_ti_lite.yaml 
-                                      --cfg yolov5l6_kpts_ti_lite.yaml 
+### (2) <a id="prepare">准备数据</a>
+按照如下步骤进行：
+1. 将COCO数据集或自定义数据集组织为如下格式，其中自定义数据的json标注文件为每张图片对应的标注文件，格式和coco类似，包含图片中所有人的关键点和边界框的绝对坐标，如果事先已经转换为YOLO-Pose格式的txt标注文件，可以跳过这一步
+```bash
+...
+data
+  |--coco_kpts
+  |		|--images
+  |		 	|--train2017
+  |		 		|--image1.jpg
+  |		 		|--image2.jpg
+  |		 		|--...
+  |		 	|--val2017
+  |		 		|--image3.jpg
+  |		 		|--image4.jpg
+  |		 		|--...
+  |		|--labels  # https://drive.google.com/file/d/1irycJwXYXmpIUlBt88BZc2YzH__Ukj6A/view 下载
+  |		 	|--train2017
+  |		 		|--image1.txt
+  |		 		|--image2.txt
+  |		 		|--...
+  |		 	|--val2017
+  |		 		|--image3.txt
+  |		 		|--image4.txt
+  |		 		|--...
+  |		|--train2017.txt
+  |		|--tval2017.txt
+  |
+  |--custom_kpts
+  |		|--images
+  |		 	|--image1.jpg
+  |		 	|--image1.jpg
+  |		|--annotations
+  |		 	|--image1.json
+  |		 	|--image1.json
+  |--...
+...
 ```
-TO train a model at different at input resolution of 640, run the command below:
+2. 将自定义数据集的json标注文件转为YOLO格式的txt标注文件（如果使用COCO数据集可以跳过步骤234）
+```bash
+# 运行如下命令，将在data/custom_kpts下生成labels文件夹，里面保存了转换的txt标注文件
+python escalator/json2yolo.py \
+	--json_dir data/custom_kpts/annotations \
+	--label_dir data/custom_kpts/labels
+
+## 参数含义
+## --json_dir	json标注文件所在文件夹
+## --label_dir	txt标注文件保存的文件夹
 ```
-python train.py --data coco_kpts.yaml --cfg yolov5s6_kpts_ti_lite.yaml --weights 'path to the pre-trained ckpts' --batch-size 64 --img 640 --kpt-label --hyp hyp.scratch_lite.yaml
+3. 划分数据集
+```bash
+# 运行如下命令，划分训练集、验证集、测试集，将在data/custom_kpts生成train.txt，val.txt，test.txt
+python escalator/split.py \
+	--image_dir data/custom_kpts/images \
+	--prefix_path ./images/ \
+	--out_path data/custom_kpts \
+	--split 0.7 0.2 0.1
+	
+## 参数含义
+## --image_dir: 	图片路径
+## --prefix_path	train.txt中文件路径前缀
+## --out_path		train.txt文件保存的文件夹
+## --split			训练集：验证集：测试集的划分比例
 ```
 
- The same pretrained model can be used here as well.
+4.  随机可视化数据，确保label转换正常
+```bash
+# 随机抽取转换的txt文件可视化，可视化结果保存在runs/visual文件夹中
+python escalator/visual.py \
+	--data_root data/custom_kpts \
+	--data_file train.txt \
+	--visual_num 5 \
+	--save_dir runs/visual
 
-## **Activation Function: SiLU vs ReLU**
+## 参数含义
+## --data_root 	数据集目录
+## --data_file 	训练集文件
+## --visual_num 可视化数量
+## --save_dir 	可视化结果保存路径
+```
+### (3) 训练
+1. 从头训练（scratch）
+```bash
+# scratch (custom data only)
+python train.py \
+	--weights weights/yolov5l6_pose.pt \
+	--cfg models/hub/yolov5l6_kpts.yaml \
+	--data data/custom_kpts.yaml \
+	--hyp data/hyp.scratch.yaml \
+	--epochs 300 \
+	--batch-size 16 \
+	--img-size 832 \
+	--device 0,1 \
+	--workers 8 \
+	--kpt-label \
+	--project runs/train
 
-We have performed some experiments to evaluate the impact of changing the activation from SiLU to ReLU on accuracy for a given model. Here are some results:
+## 参数含义: 详见官方文档以及代码
+```
+2. 微调（finetune）
+```bash
+# finetune (custom data only)
+python train.py \
+	--weights weights/yolov5l6_pose.pt \
+	--cfg models/hub/yolov5l6_kpts.yaml \
+	--data data/custom_kpts.yaml \
+	--hyp data/hyp.finetune_evolve.yaml \
+	--epochs 200 \
+	--batch-size 64 \
+	--img-size 832 \
+	--device 0,1 \
+	--workers 8 \
+	--kpt-label \
+	--freeze 12 \
+	--project runs/finetune
+## 参数含义: 详见官方文档以及代码
+```
+## 4. 测试结果
+在自定义数据集上训练后，导出训练后的yolov5l6模型，速度测试的环境为Jetson Xavier NX，测试工具为trtexec，测试结果如下：
+<p align="center"><font face="黑体" size=3.>表1 自定义数据集测试结果</font></p>
+<div align="center">
 
-|Dataset |Model Name                      |Input Size |GMACS  |AP[0.5:0.95]%| AP50%|Notes |
-|--------|------------------------------- |-----------|----------|-------------|------|----- |
-|COCO    |Yolov5m6_pose_960_ti_lite       |960x960    |**58.7**  |  65.9      | 88.6 |activation=ReLU|
-|COCO    |Yolov5m6_pose_960_ti_lite       |960x960    |**58.7**  |  67.0      | 89.0 |activation=SiLU|
+|     精度      |   测试尺寸   |     mAP     |  速度(Jetson Xavier NX)  |
+|    :----:    | :---------: |  :-------:  | :----: |
+| Pytorch FP32 |  832×832    |    0.803    |   -    |
+| Pytorch FP16 |  832×832    |    0.803    |   -    |
+| ONNX FP16    |  832×832    |    0.803    |   -    |
+| TensorRT FP16|  832×832    |    0.803    | 70.80 ms |
+| TensorRT INT8|  832×832    |    0.789    | 42.90 ms |
 
+</div>
 
-## **Experiments with Decoder of Increasing Depth**
-We performed a set of experiments where we start with the keypoint decoder having a single convolution to increasing the depth by once depth-wise convolution at a time.
-The table below shows the improvement of accuracy with the addition of each convolution in the keypoint decoder.
+<p align="center"><font face="黑体" size=3.>表2  模型NMS测试结果</font></p>
+<div align="center">
 
-|Dataset |Model Name                      |Input Size |GMACS  |AP[0.5:0.95]%| AP50%|Notes |
-|--------|------------------------------- |-----------|----------|-------------|------|----- |
-|COCO    |[Yolov5s6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_60p3_85p5_kpts_head_dwconv_3x3/weights/last.pt)            |960x960  |**19.4** |   60.3      | 85.5 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_60p3_85p5_kpts_head_dwconv_3x3/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_60p3_85p5_kpts_head_dwconv_3x3/hyp.yaml)|
-|COCO    |[Yolov5s6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_60p9_86p0_kpts_head_2x_dwconv_3x3/weights/last.pt)         |960x960  |**20.1** |   60.9      | 86.0 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_60p9_86p0_kpts_head_2x_dwconv_3x3/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_60p9_86p0_kpts_head_2x_dwconv_3x3/hyp.yaml)|
-|COCO    |[Yolov5s6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p2_85p6_kpts_head_3x_dwconv_3x3/weights/last.pt)         |960x960  |**20.8** |   61.2      | 85.6 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p2_85p6_kpts_head_3x_dwconv_3x3/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p2_85p6_kpts_head_3x_dwconv_3x3/hyp.yaml)|
-|COCO    |[Yolov5s6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p4_85p9_kpts_head_3x_dwconv_3x3_lr_0p01/weights/last.pt) |960x960  |**20.8** |   61.4      | 85.9 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p4_85p9_kpts_head_3x_dwconv_3x3_lr_0p01/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p4_85p9_kpts_head_3x_dwconv_3x3_lr_0p01/hyp.yaml)|
-|COCO    |[Yolov5s6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p8_86p4_kpts_head_4x_dwconv_3x3_lr_0p01/weights/last.pt) |960x960  |**21.5** |   61.8      | 86.4 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p8_86p4_kpts_head_4x_dwconv_3x3_lr_0p01/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_61p8_86p4_kpts_head_4x_dwconv_3x3_lr_0p01/hyp.yaml)|
-|COCO    |[Yolov5s6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_62p3_86p3_kpts_head_5x_dwconv_3x3_lr_0p01/weights/best.pt) |960x960  |**22.2** |   62.3      | 86.3 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_62p3_86p3_kpts_head_5x_dwconv_3x3_lr_0p01/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_62p3_86p3_kpts_head_5x_dwconv_3x3_lr_0p01/hyp.yaml)|
-|COCO    |[Yolov5s6_pose_960](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_62p3_86p6_kpts_head_6x_dwconv_3x3_lr_0p01/weights/last.pt) |960x960  |**22.8** |   62.3      | 86.6 |[opt.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_62p3_86p6_kpts_head_6x_dwconv_3x3_lr_0p01/opt.yaml), [hyp.yaml](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/08_02_00_11/edgeai-yolov5/pretrained_models/checkpoints/keypoint/coco/edgeai-yolov5/other/lite_dwconv_models/yolov5s6_960_62p3_86p6_kpts_head_6x_dwconv_3x3_lr_0p01/hyp.yaml)|
+| NMS  |precision|   测试尺寸   | conf thresh | iou thresh |    mAP  | speed in NX (ms) |
+|:----:|  :----: | :---------: |  :-------:  |  :------:  | :-----: |:---------------: |
+|      |   FP16  |  832×832    |    0.45     |     0.5    |  0.776  |     70.80     |
+|   √  |   FP16  |  832×832    |    0.45     |     0.5    |  0.769  |     71.16     |
+|      |   INT8  |  832×832    |    0.45     |     0.5    |  0.762  |     42.90     |
+|   √  |   INT8  |  832×832    |    0.45     |     0.5    |  0.750  |     43.76     |
 
-The final model with six depth-wise layers is used as the final configuration of the YOLO-Pose models. This is not used for the YOLO-Pose-ti-lite models though.
+</div>
 
+&emsp;&emsp;上表同时列出了INT8与FP16的测试结果，由于训练时采用混合精度训练，所以从上表3的结果可以看出，FP16和FP32的精度是一致的，从pytoch到onnx再到TensorRT的过程中并无精度损失。从表4来看，模型加入NMS后，推理耗时增加了1ms左右，说明将NMS放与模型内，其耗时在1ms左右，而如果放在模型外，经测试，使用pytorch自带的NMS，耗时在2ms以上，需要说明的是，NMS本身耗时不多，将NMS放在模型内的主要目的一是端到端，不用在后处理部分进行NMS，二是在DeepStream中，如果提前在模型内做完NMS，那么DeepStream输出的Tensor会大大减小，经过测试对于DeepStream有一定的速度提升。对于检测精度的影响而言，NMS放入模型后，从表2的mAP测试结果可以看出，精度有所下降，但在可接受范围内，FP16的情况下下降0.7个点，对检测效果基本无影响。
 
+&emsp;&emsp;从表1结果可以看出，在Jetson Xavier NX上，INT8与FP16相比模型mAP下降1.4左右，对于检测性能影响较小，而推理耗时可减少28ms，取得更快的推理速度。
+&emsp;&emsp;在Jetson Xavier NX上进行INT8量化时，可以将量化数据（采集的数据，1024张即可）拷贝到NX设备上，然后进行量化，也可将在服务器上转换完成后生成的int8量化缓存文件（caches文件夹下的.cache文件）和onnx模型文件放在NX上进行转化而无需拷贝数据到NX上。
 
-## **Model Testing**
+## 5. 其他注意事项
+1. NMS模型使用了EfficientNMS算法，对于iou阈值和置信度阈值较为敏感，阈值较低会导致模型无法输出正确结果，建议导出onnx模型时iou阈值大于0.45，置信度阈值大于0.5
+2. 代码中的INT8量化使用的是PTQ量化，QAT量化有尝试过但是失败了（导出到onnx模型推理结果都正常，但是导出TensorRT后无法得到正确结果不知道为啥。。。）
+3. INT8 PTQ量化有两种常用的校准器：最大最小校准器（MinMaxCalibrator）和熵校准器（EntropyCalibrator2），实际测试对于YOLO-Pose最大最小校准器掉点更少
+4. INT8 PTQ量化时，发现如果在校准数据预处理时开启灰边填充（letterbox）并且设置参数`auto=True`时会掉点较多，实际发现是在训练虽然有开启灰边填充和mosaic，但是参数`auto=False`，引入的灰边较少；而如果设置参数`auto=True`会引入较多灰边，影响校准时的数据直方图，实际测试关闭灰边填充掉点最少
+5. 写TensorRT推理代码时，如果使用pytorch代替pycuda进行数据拷贝，需要注意模型的输入图片数据精度需要与输入层的数据精度一样，否者无法得到正确的推理结果
+6. pytorch和pycud同时使用时可能产生一些奇怪的错误，可能与cuda资源的初始化有关
 
-* Run the following command to replicate the accuracy number on the pretrained checkpoints:
-    ```
-    python test.py --data coco_kpts.yaml --img 960 --conf 0.001 --iou 0.65 --weights "path to the pre-trained ckpt" --kpt-label
-    ```
-
-* To test a model at different at input resolution of 640, run the command below:
-
-    ```
-    python test.py --data coco_kpts.yaml --img 960 --conf 0.001 --iou 0.65 --weights "path to the pre-trained ckpt" --kpt-label
-    ```
-
-<br/> 
-
-###  **ONNX Export Including Detection and Pose Estimation:**
-* Run the following command to export the entire models including the detection part, 
-    ``` 
-    python export.py --weights "path to the pre-trained ckpt"  --img 640 --batch 1 --simplify --export-nms # export at 640x640 with batch size 1
-    ```
-* Apart from exporting the complete ONNX model, above script will generate a prototxt file that contains information of the detection layer. This prototxt file is required to deploy the moodel on TI SoC.
-
-###  **ONNXRT Inference: Human Pose Estimation Inference with an End-to-End ONNX Model:**
-
- * If you haven't exported a model with the above command, download a sample model from this [link](http://software-dl.ti.com/jacinto7/esd/modelzoo/gplv3/latest/edgeai-yolov5/pretrained_models/models/keypoint/coco/edgeai-yolov5/yolov5s6_pose_640_ti_lite_54p9_82p2.onnx).
- * Run the script as below to run inference with an ONNX model. The script runs inference and visualize the results. There is no extra post-processing required. The ONNX model is self-sufficient unlike existing bottom-up approaches. The [script](onnx_inference/yolo_pose_onnx_inference.py) is compleletey independent and contains all perprocessing and visualization. 
-    ``` 
-    cd onnx_inference
-    python yolo_pose_onnx_inference.py --model-path "path_to_onnx_model"  --img-path "sample_ips.txt" --dst-path "sample_ops_onnxrt"  # Run inference on a set of sample images as specified by sample_ips.txt
-    ```
-    
-
-## **References**
-
-[1] [Official YOLOV5 repository](https://github.com/ultralytics/yolov5/) <br>
-[2] [yolov5-improvements-and-evaluation, Roboflow](https://blog.roboflow.com/yolov5-improvements-and-evaluation/) <br>
-[3] [Focus layer in YOLOV5]( https://github.com/ultralytics/yolov5/discussions/3181) <br>
-[4] [CrossStagePartial Network](https://github.com/WongKinYiu/CrossStagePartialNetworkss)  <br>
-[5] Chien-Yao Wang, Hong-Yuan Mark Liao, Yueh-Hua Wu, Ping-Yang Chen, Jun-Wei Hsieh, and I-Hau Yeh. [CSPNet: A new backbone that can enhance learning capability of
-cnn](https://arxiv.org/abs/1911.11929). Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition Workshop (CVPR Workshop),2020. <br>
-[6]Shu Liu, Lu Qi, Haifang Qin, Jianping Shi, and Jiaya Jia. [Path aggregation network for instance segmentation](https://arxiv.org/abs/1803.01534). In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR), pages 8759–8768, 2018 <br>
-[7] [Efficientnet-lite quantization](https://blog.tensorflow.org/2020/03/higher-accuracy-on-vision-models-with-efficientnet-lite.html) <br>
-[8] [YOLOv5 Training video from Texas Instruments](https://training.ti.com/process-efficient-object-detection-using-yolov5-and-tda4x-processors) <br> 
-[9] [YOLO-Pose Training video from Texas Instruments:Upcoming](Upcoming)
+## Reference
+[1] [Official YOLOV5 repository](https://github.com/ultralytics/yolov5/)  
+[2] [Official YOLO-Pose repository](https://github.com/TexasInstruments/edgeai-yolov5/tree/yolo-pose)
