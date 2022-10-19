@@ -4,7 +4,7 @@
 2. 导出TensorRT模型，包括FP16和INT8
 3. 测试和推理导出的模型，包括pytorch、onnx、TensorRT模型
 4. 处理和训练自定义数据
-5. 修改了forward函数，部署TensorRT后比优化前速度更快，修改内容见[这里](docs/add_no_inplace)
+5. 修改了forward函数，部署TensorRT后比优化前速度更快，修改内容见[这里](docs/add_no_inplace.md)
 
 ## 1.模型导出
 ### （1）导出onnx
@@ -85,21 +85,21 @@ python models/export_TRT.py \
 '''
 参数含义: 更多释义详见代码
 python models/export_TRT.py 
-	--onnx				onnx模型路径
-	--batch-size		导出TensorRT模型的batch size，只有onnx为动态模型时有效
-	--device			导出TensorRT时使用的GPU id
-	--fp16				导出FP16精度的TensorRT模型
-	--int8				导出INT8精度的TensorRT模型
-	--workspace			导出TensorRT时最多可以使用的GPU显存
-	--verbose			输出详细信息
-	--dynamic			导出动态TensorRT模型，只有在onnx模型是动态时有效
-	--calib_path		校准图片所在路径
-	--calib_num			校准图片使用数量
-	--calib_batch		校准图片batch size
-	--calib_imgsz		校准图片尺寸
-	--calib_method		校准方式，提供MinMax和Entropy两种
-	--calib_letterbox	是否进行灰边填充
-	--cache_dir			校准缓存文件保持文件夹
+  --onnx            onnx模型路径
+  --batch-size      导出TensorRT模型的batch size，只有onnx为动态模型时有效
+  --device          导出TensorRT时使用的GPU id
+  --fp16            导出FP16精度的TensorRT模型
+  --int8            导出INT8精度的TensorRT模型
+  --workspace       导出TensorRT时最多可以使用的GPU显存
+  --verbose         输出详细信息
+  --dynamic         导出动态TensorRT模型，只有在onnx模型是动态时有效
+  --calib_path      校准图片所在路径
+  --calib_num       校准图片使用数量
+  --calib_batch     校准图片batch size
+  --calib_imgsz     校准图片尺寸
+  --calib_method    校准方式，提供MinMax和Entropy两种
+  --calib_letterbox 是否进行灰边填充
+  --cache_dir       校准缓存文件保持文件夹
 '''
 ```
 
