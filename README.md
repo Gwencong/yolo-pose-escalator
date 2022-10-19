@@ -4,7 +4,7 @@
 2. 导出TensorRT模型，包括FP16和INT8
 3. 测试和推理导出的模型，包括pytorch、onnx、TensorRT模型
 4. 处理和训练自定义数据
-5. 修改了forward函数，部署TensorRT后比优化前速度更快，修改内容见[这里](docs/add_no_inplace.md)
+5. 修改了forward函数，部署TensorRT后比优化前速度更快，修改内容见[这里](./docs/add_no_inplace.md)
 
 ## 1.模型导出
 ### （1）导出onnx
