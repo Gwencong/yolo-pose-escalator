@@ -17,25 +17,25 @@ onnx的导出脚本为`models/export_onnx.py`，支持
 ```bash
 # 导出onnx模型
 python models/export_onnx.py \
-	--weights weights/yolov5l6_pose.pt \
-	--img-size 832 \
-	--device 0 \
-	--batch-size 1 \
-	--simplify \
-	--half
+  --weights weights/yolov5l6_pose.pt \
+  --img-size 832 \
+  --device 0 \
+  --batch-size 1 \
+  --simplify \
+  --half
 
 # 导出带onnx的模型
 python models/export_onnx.py \
-	--weights weights/yolov5l6_pose.pt \
-	--img-size 832 \
-	--batch-size 1 \
-	--device 0 \
-	--simplify \
-	--half \
-	--end2end \
-	--topk-all 100 \
-	--iou-thres 0.45 \
-	--conf-thres 0.5
+  --weights weights/yolov5l6_pose.pt \
+  --img-size 832 \
+  --batch-size 1 \
+  --device 0 \
+  --simplify \
+  --half \
+  --end2end \
+  --topk-all 100 \
+  --iou-thres 0.45 \
+  --conf-thres 0.5
 
 '''
 参数含义：更多释义详见代码
@@ -59,28 +59,28 @@ python models/export_onnx.py \
 ```bash
 # export TensorRT with scripts
 python models/export_TRT.py \
-	--onnx weights/yolov5l6_pose.onnx \
-	--batch-size 1 \
-	--fp16
+  --onnx weights/yolov5l6_pose.onnx \
+  --batch-size 1 \
+  --fp16
 	
 # export TensorRT with trtexec
 trtexec \
-	--onnx=weights/yolov5l6_pose.onnx \
-	--workspace=4096 \
-	--saveEngine=weights/yolov5l6_pose.trt \
-	--fp16
+  --onnx=weights/yolov5l6_pose.onnx \
+  --workspace=4096 \
+  --saveEngine=weights/yolov5l6_pose.trt \
+  --fp16
 
 # export TensorRT with INT8 precision
 python models/export_TRT.py \
-	--onnx weights/yolov5l6_pose.onnx \
-	--batch-size 1 \
-	--device 0 \
-	--int8 \
-	--calib_path data/custom_kpts/images \
-	--calib_num 1024 \
-	--calib_batch 128 \
-	--calib_imgsz 832 \
-	--cache_dir caches
+  --onnx weights/yolov5l6_pose.onnx \
+  --batch-size 1 \
+  --device 0 \
+  --int8 \
+  --calib_path data/custom_kpts/images \
+  --calib_num 1024 \
+  --calib_batch 128 \
+  --calib_imgsz 832 \
+  --cache_dir caches
 	
 '''
 参数含义: 更多释义详见代码
@@ -110,27 +110,27 @@ python models/export_TRT.py
 ```bash
 # detect with TensorRT model
 python detect_multi_backend.py \
-    --weights weights/yolov5l6_pose-FP16.trt \
-    --source data/images \
-    --device 0 \
-    --img-size 832 \
-    --kpt-label
+  --weights weights/yolov5l6_pose-FP16.trt \
+  --source data/images \
+  --device 0 \
+  --img-size 832 \
+  --kpt-label
 
 # detect with ONNX model
 python detect_multi_backend.py \
-    --weights weights/yolov5l6_pose.onnx \
-    --source data/images \
-    --device 0\
-    --img-size 832 \
-    --kpt-label
+  --weights weights/yolov5l6_pose.onnx \
+  --source data/images \
+  --device 0\
+  --img-size 832 \
+  --kpt-label
 
 # detect with Pytorch model
 python detect_multi_backend.py \
-    --weights weights/yolov5l6_pose.pt \
-    --source data/images \
-    --device 0 \
-    --img-size 832 \
-    --kpt-label
+  --weights weights/yolov5l6_pose.pt \
+  --source data/images \
+  --device 0 \
+  --img-size 832 \
+  --kpt-label
 
 ## 参数比较简单，和detect.py一样，详见代码
 ```
@@ -139,36 +139,36 @@ python detect_multi_backend.py \
 ```bash
 # test TensorRT model
 python test_multi_backend.py \
-    --weights weights/yolov5l6_pose-INT8.trt \
-    --data data/coco_kpts.yaml \
-    --img-size 832 \
-    --conf-thres 0.001 \
-    --iou-thres 0.6 \
-    --task val \
-    --device 0 \
-    --kpt-label
+  --weights weights/yolov5l6_pose-INT8.trt \
+  --data data/coco_kpts.yaml \
+  --img-size 832 \
+  --conf-thres 0.001 \
+  --iou-thres 0.6 \
+  --task val \
+  --device 0 \
+  --kpt-label
 
 # test ONNX model
 python test_multi_backend.py \
-    --weights weights/yolov5l6_pose.onnx \
-    --data data/coco_kpts.yaml \
-    --img-size 832 \
-    --conf-thres 0.001 \
-    --iou-thres 0.6 \
-    --task val \
-    --device 0 \
-    --kpt-label
+  --weights weights/yolov5l6_pose.onnx \
+  --data data/coco_kpts.yaml \
+  --img-size 832 \
+  --conf-thres 0.001 \
+  --iou-thres 0.6 \
+  --task val \
+  --device 0 \
+  --kpt-label
 
 # test Pytorch model
 python test_multi_backend.py \
-    --weights weights/yolov5l6_pose.pt \
-    --data data/coco_kpts.yaml \
-    --img-size 832 \
-    --conf-thres 0.001 \
-    --iou-thres 0.6 \
-    --task val \
-    --device 0 \
-    --kpt-label
+  --weights weights/yolov5l6_pose.pt \
+  --data data/coco_kpts.yaml \
+  --img-size 832 \
+  --conf-thres 0.001 \
+  --iou-thres 0.6 \
+  --task val \
+  --device 0 \
+  --kpt-label
 
 ## 参数比较简单，和test.py一样，详见代码
 ```
@@ -225,8 +225,8 @@ data
 ```bash
 # 运行如下命令，将在data/custom_kpts下生成labels文件夹，里面保存了转换的txt标注文件
 python escalator/json2yolo.py \
-	--json_dir data/custom_kpts/annotations \
-	--label_dir data/custom_kpts/labels
+  --json_dir data/custom_kpts/annotations \
+  --label_dir data/custom_kpts/labels
 
 ## 参数含义
 ## --json_dir	json标注文件所在文件夹
@@ -236,10 +236,10 @@ python escalator/json2yolo.py \
 ```bash
 # 运行如下命令，划分训练集、验证集、测试集，将在data/custom_kpts生成train.txt，val.txt，test.txt
 python escalator/split.py \
-	--image_dir data/custom_kpts/images \
-	--prefix_path ./images/ \
-	--out_path data/custom_kpts \
-	--split 0.7 0.2 0.1
+  --image_dir data/custom_kpts/images \
+  --prefix_path ./images/ \
+  --out_path data/custom_kpts \
+  --split 0.7 0.2 0.1
 	
 ## 参数含义
 ## --image_dir: 	图片路径
@@ -252,10 +252,10 @@ python escalator/split.py \
 ```bash
 # 随机抽取转换的txt文件可视化，可视化结果保存在runs/visual文件夹中
 python escalator/visual.py \
-	--data_root data/custom_kpts \
-	--data_file train.txt \
-	--visual_num 5 \
-	--save_dir runs/visual
+  --data_root data/custom_kpts \
+  --data_file train.txt \
+  --visual_num 5 \
+  --save_dir runs/visual
 
 ## 参数含义
 ## --data_root 	数据集目录
@@ -268,17 +268,17 @@ python escalator/visual.py \
 ```bash
 # scratch (custom data only)
 python train.py \
-	--weights weights/yolov5l6_pose.pt \
-	--cfg models/hub/yolov5l6_kpts.yaml \
-	--data data/custom_kpts.yaml \
-	--hyp data/hyp.scratch.yaml \
-	--epochs 300 \
-	--batch-size 16 \
-	--img-size 832 \
-	--device 0,1 \
-	--workers 8 \
-	--kpt-label \
-	--project runs/train
+  --weights weights/yolov5l6_pose.pt \
+  --cfg models/hub/yolov5l6_kpts.yaml \
+  --data data/custom_kpts.yaml \
+  --hyp data/hyp.scratch.yaml \
+  --epochs 300 \
+  --batch-size 16 \
+  --img-size 832 \
+  --device 0,1 \
+  --workers 8 \
+  --kpt-label \
+  --project runs/train
 
 ## 参数含义: 详见官方文档以及代码
 ```
@@ -286,18 +286,18 @@ python train.py \
 ```bash
 # finetune (custom data only)
 python train.py \
-	--weights weights/yolov5l6_pose.pt \
-	--cfg models/hub/yolov5l6_kpts.yaml \
-	--data data/custom_kpts.yaml \
-	--hyp data/hyp.finetune_evolve.yaml \
-	--epochs 200 \
-	--batch-size 64 \
-	--img-size 832 \
-	--device 0,1 \
-	--workers 8 \
-	--kpt-label \
-	--freeze 12 \
-	--project runs/finetune
+  --weights weights/yolov5l6_pose.pt \
+  --cfg models/hub/yolov5l6_kpts.yaml \
+  --data data/custom_kpts.yaml \
+  --hyp data/hyp.finetune_evolve.yaml \
+  --epochs 200 \
+  --batch-size 64 \
+  --img-size 832 \
+  --device 0,1 \
+  --workers 8 \
+  --kpt-label \
+  --freeze 12 \
+  --project runs/finetune
 ## 参数含义: 详见官方文档以及代码
 ```
 ## 4. 测试结果
