@@ -24,7 +24,7 @@ python models/export_onnx.py \
   --simplify \
   --half
 
-# 导出带onnx的模型
+# 导出带NMS的模型
 python models/export_onnx.py \
   --weights weights/yolov5l6_pose.pt \
   --img-size 832 \
