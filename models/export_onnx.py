@@ -116,7 +116,7 @@ if __name__ == '__main__':
                           input_names=input_names, output_names=output_names,
                           do_constant_folding=True if device.type == 'cpu' else False,
                           dynamic_axes={'input': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
-                                        'output': {0: 'batch', 2: 'y', 3: 'x'}} if opt.dynamic else None)
+                                        'output': {0: 'batch', 2: 'anchors'}} if opt.dynamic else None)
 
         # Checks
         model_onnx = onnx.load(f)  # load onnx model
@@ -138,8 +138,7 @@ if __name__ == '__main__':
                 import onnxsim
 
                 print(f'{prefix} simplifying with onnx-simplifier {onnxsim.__version__}...')
-                model_onnx, check = onnxsim.simplify(model_onnx,
-                                                     input_shapes={'input': list(img.shape)} if opt.dynamic else None)
+                model_onnx, check = onnxsim.simplify(model_onnx)
                 assert check, 'assert check failed'
                 onnx.save(model_onnx, f)
                 nodes = model_onnx.graph.node
