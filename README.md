@@ -338,7 +338,7 @@ python train.py \
 3. INT8 PTQ量化有两种常用的校准器：最大最小校准器（MinMaxCalibrator）和熵校准器（EntropyCalibrator2），实际测试对于YOLO-Pose最大最小校准器掉点更少
 4. INT8 PTQ量化时，发现如果在校准数据预处理时开启灰边填充（letterbox）并且设置参数`auto=True`时会掉点较多，实际发现是在训练虽然有开启灰边填充和mosaic，但是参数`auto=False`，引入的灰边较少；而如果设置参数`auto=True`会引入较多灰边，影响校准时的数据直方图，实际测试关闭灰边填充掉点最少
 5. 写TensorRT推理代码时，如果使用pytorch代替pycuda进行数据拷贝，需要注意模型的输入图片数据精度需要与输入层的数据精度一样，否者无法得到正确的推理结果
-6. pytorch和pycud同时使用时可能产生一些奇怪的错误，可能与cuda资源的初始化有关
+6. pytorch和pycuda同时使用时可能产生一些奇怪的错误，可能与cuda资源的初始化有关
 
 ## Reference
 [1] [Official YOLOV5 repository](https://github.com/ultralytics/yolov5/)  
