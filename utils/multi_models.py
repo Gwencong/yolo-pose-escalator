@@ -154,7 +154,8 @@ class Pt_Infer():
 
     def __call__(self, img, *args, **kwds):
         if isinstance(img,np.ndarray):
-            img = torch.from_numpy(img).to(self.device)
+            img = torch.from_numpy(img)
+        img = img.to(self.device)
         img = img.half() if self.half else img.float()
         output = self.model(img,*args, **kwds)[0]
         return output
