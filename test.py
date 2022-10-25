@@ -1,3 +1,12 @@
+## 如果在COCO数据集上进行验证时发现代码（YOLOv5）计算出来的mAP比COCO API计算出来的mAP相差较多，主要可能原因是
+## 原因一是 COCO API计算AP时，使用了所有验证集数据(5000张图片)，而YOLO-Pose中验证集只包含了验证集中一部分(2340张图片)
+## 原因二是 COCO API计算AP时，使用了ground truth 的area, 而代码中则是area = gtbox的宽x高x0.6, area值越高计算出来的AP越高
+## 因为自定义数据集标注人的区域面积成本较大, 因此用0.6box面积代替
+## If the mAP calculated by the code (YOLOv5) is more different than that calculated by the COCO API during validation on the COCO dataset, the main possible reasons are as follows：
+## The first reason is that the COCO API uses all the validation set data (5000 pictures) to calculate the AP, while the validation set in YOLO Pose only contains a part of the validation set (2340 pictures)
+## The second reason is that the COCO API uses the area of the ground truth(human labeled) to calculate the oks, while in the code, the area=(ground truth box width) x (ground truth box width height) x 0.6. The higher the area value, the higher the AP will be
+## Because if the custom dataset labels the area of the person, the labeling cost is large, so the 0.6 times area of box is used instead.
+
 import argparse
 import json
 import os
@@ -17,6 +26,7 @@ from utils.metrics import ap_per_class, ConfusionMatrix
 from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized
 import cv2
+from utils.general import oks_iou,oks_iou_fast
 
 
 def test(data,
@@ -106,7 +116,9 @@ def test(data,
     s = ('%20s' + '%12s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
     p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
     loss = torch.zeros(3, device=device)
-    jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
+    jdict, stats_det, ap, ap_class, wandb_images = [], [], [], [], []
+    if kpt_label:
+        stats_kpt = []
     #jdict_kpt = [] if kpt_label else None
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
@@ -164,7 +176,9 @@ def test(data,
 
             if len(pred) == 0:
                 if nl:
-                    stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
+                    stats_det.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
+                    if kpt_label:
+                        stats_kpt.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
                 continue
 
             # Predictions
@@ -205,13 +219,13 @@ def test(data,
             # Append to pycocotools JSON dictionary
             if save_json or save_json_kpt:
                 # [{"image_id": 42, "category_id": 18, "bbox": [258.15, 41.29, 348.26, 243.78], "score": 0.236}, ...
-                image_id = int(path.stem) if path.stem.isnumeric() else path.stem
+                image_id = int(path.stem) if path.stem.isnumeric() and is_coco else path.stem
                 box = xyxy2xywh(predn[:, :4])  # xywh
                 box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
                 for p, b in zip(predn.tolist(), box.tolist()):
                     det_dict = {'image_id': image_id,
-                                'category_id': coco91class[int(p[5])] if is_coco else int(p[5]),
-                                #'bbox': [round(x, 3) for x in b],
+                                'category_id': coco91class[int(p[5])] if is_coco else 1+int(p[5]),
+                                'bbox': [round(x, 3) for x in b],
                                 'score': round(p[4], 5)}
                     if kpt_label:
                         key_point = p[6:]
@@ -220,9 +234,12 @@ def test(data,
                     jdict.append(det_dict)
 
             # Assign all predictions as incorrect
-            correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
+            correct_det = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
+            if kpt_label:
+                correct_kpt = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
             if nl:
-                detected = []  # target indices
+                detected_det = []  # target indices
+                detected_kpt = []  # target indices
                 tcls_tensor = labels[:, 0]
 
                 # target boxes
@@ -243,24 +260,38 @@ def test(data,
                     # Search for detections
                     if pi.shape[0]:
                         # Prediction to target ious
-                        ious, i = box_iou(predn[pi, :4], tbox[ti]).max(1)  # best ious, indices
-
+                        ious_det, i = box_iou(predn[pi, :4], tbox[ti]).max(1)  # best ious, indices
+                        
                         # Append detections
                         detected_set = set()
-                        for j in (ious > iouv[0]).nonzero(as_tuple=False):
+                        for j in (ious_det > iouv[0]).nonzero(as_tuple=False):
                             d = ti[i[j]]  # detected target
                             if d.item() not in detected_set:
                                 detected_set.add(d.item())
-                                detected.append(d)
-                                correct[pi[j]] = ious[j] > iouv  # iou_thres is 1xn
-                                if len(detected) == nl:  # all targets already located in image
+                                detected_det.append(d)
+                                correct_det[pi[j]] = ious_det[j] > iouv  # iou_thres is 1xn
+                                if len(detected_det) == nl:  # all targets already located in image
                                     break
 
+                        if kpt_label:
+                            ious_kpt, i = oks_iou_fast(predn[pi, 6:], tkpt[ti], predn[pi,:4], tbox[ti], predn[pi,4], maxDets=20,xyxy=True).max(1)
+                            detected_set = set()
+                            for j in (ious_kpt > iouv[0]).nonzero(as_tuple=False):
+                                d = ti[i[j]]  # detected target
+                                if d.item() not in detected_set:
+                                    detected_set.add(d.item())
+                                    detected_kpt.append(d)
+                                    correct_kpt[pi[j]] = ious_kpt[j] > iouv  # iou_thres is 1xn
+                                    if len(detected_kpt) == nl:  # all targets already located in image
+                                        break
+        
             # Append statistics (correct, conf, pcls, tcls)
-            stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
+            stats_det.append((correct_det.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
+            if kpt_label:
+                stats_kpt.append((correct_kpt.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
 
         # Plot images
-        if plots and batch_i < 3000:
+        if plots and batch_i < 3:
             f = save_dir / f'{path.stem}_labels.jpg'  # labels
             #Thread(target=plot_images, args=(img, targets, paths, f, names), daemon=True).start()
             plot_images(img, targets, paths, f, names, kpt_label=kpt_label, orig_shape=shapes[si])
@@ -269,23 +300,47 @@ def test(data,
             plot_images(img, output_to_target(out), paths, f, names, kpt_label=kpt_label, steps=3, orig_shape=shapes[si])
 
     # Compute statistics
-    stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
-    if len(stats) and stats[0].any():
-        p, r, ap, f1, ap_class = ap_per_class(*stats, plot=plots, save_dir=save_dir, names=names)
+    stats_det = [np.concatenate(x, 0) for x in zip(*stats_det)]  # to numpy
+    if len(stats_det) and stats_det[0].any():
+        save_path = save_dir/'det'
+        save_path.mkdir(parents=True,exist_ok=True)
+        p, r, ap, f1, ap_class = ap_per_class(*stats_det, plot=plots, save_dir=save_path, names=names)
         ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
         mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
-        nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
+        nt = np.bincount(stats_det[3].astype(np.int64), minlength=nc)  # number of targets per class
     else:
         nt = torch.zeros(1)
 
     # Print results
     pf = '%20s' + '%12i' * 2 + '%12.3g' * 4  # print format
-    print(pf % ('all', seen, nt.sum(), mp, mr, map50, map))
+    print(pf % ('all(det)', seen, nt.sum(), mp, mr, map50, map))
 
     # Print results per class
-    if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats):
+    if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats_det):
         for i, c in enumerate(ap_class):
             print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
+    
+    if kpt_label:
+        # Compute statistics
+        stats_kpt = [np.concatenate(x, 0) for x in zip(*stats_kpt)]  # to numpy
+        if len(stats_kpt) and stats_kpt[0].any():
+            save_path = save_dir/'kpt'
+            save_path.mkdir(parents=True,exist_ok=True)
+            p, r, ap, f1, ap_class = ap_per_class(*stats_kpt, plot=plots, save_dir=save_path, names=names)
+            ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
+            mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
+            nt = np.bincount(stats_kpt[3].astype(np.int64), minlength=nc)  # number of targets per class
+        else:
+            nt = torch.zeros(1)
+
+        # Print results
+        pf = '%20s' + '%12i' * 2 + '%12.3g' * 4  # print format
+        print(pf % ('all(kpt)', seen, nt.sum(), mp, mr, map50, map))
+
+        # Print results per class
+        if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats_kpt):
+            for i, c in enumerate(ap_class):
+                print(pf % (names[c], seen, nt[c], p[i], r[i], ap50[i], ap[i]))
 
     # Print speeds
     t = tuple(x / seen * 1E3 for x in (t0, t1, t0 + t1)) + (imgsz, imgsz, batch_size)  # tuple
@@ -307,8 +362,8 @@ def test(data,
         pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
         with open(pred_json, 'w') as f:
             json.dump(jdict, f)
+        anno_json = data.get('val-annotations',None) # annotations json
         if save_json:
-            anno_json = '../coco/annotations/instances_val2017.json'  # annotations json
             print('\nEvaluating pycocotools mAP... saving %s...' % pred_json)
             try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
                 from pycocotools.coco import COCO
@@ -316,7 +371,9 @@ def test(data,
 
                 anno = COCO(anno_json)  # init annotations api
                 pred = anno.loadRes(pred_json)  # init predictions api
-                eval = COCOeval(anno, pred, 'bbox')
+                iouType = 'keypoints' if kpt_label else 'bbox'
+                eval = COCOeval(anno, pred, iouType)
+                # eval.params.catIds = [1]
                 if is_coco:
                     eval.params.imgIds = [int(Path(x).stem) for x in dataloader.dataset.img_files]  # image IDs to evaluate
                 eval.evaluate()
@@ -327,9 +384,7 @@ def test(data,
                 print(f'pycocotools unable to run: {e}')
 
         elif save_json_kpt:
-            anno_json = '../coco/annotations/person_keypoints_val2017.json'  # annotations json
             print('\nEvaluating xtcocotools mAP... saving %s...' % pred_json)
-
             try:  # https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocoEvalDemo.ipynb
                 # from pycocotools.coco import COCO
                 # from pycocotools.cocoeval import COCOeval
@@ -362,14 +417,14 @@ def test(data,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
-    parser.add_argument('--weights', nargs='+', type=str, default='yolov5s.pt', help='model.pt path(s)')
-    parser.add_argument('--data', type=str, default='data/coco128.yaml', help='*.data path')
+    parser.add_argument('--weights', nargs='+', type=str, default='weights/yolov5l6_pose.pt', help='model.pt path(s)')
+    parser.add_argument('--data', type=str, default='data/coco_kpts.yaml', help='*.data path')
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
     parser.add_argument('--task', default='val', help='train, val, test, speed or study')
-    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--single-cls', action='store_true', help='treat as single-class dataset')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--verbose', action='store_true', help='report mAP by class')
@@ -384,7 +439,7 @@ if __name__ == '__main__':
     parser.add_argument('--project', default='runs/test', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
-    parser.add_argument('--kpt-label', action='store_true', help='Whether kpt-label is enabled or not')
+    parser.add_argument('--kpt-label', action='store_true',default=True, help='Whether kpt-label is enabled or not')
     parser.add_argument('--flip-test', action='store_true', help='Whether to run flip_test or not')
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
