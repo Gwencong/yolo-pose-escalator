@@ -21,3 +21,11 @@ python escalator/visual.py \
     --data_file train.txt \
     --visual_num 5 \
     --save_dir runs/visual
+
+# 合并json文件为COCO格式
+python escalator/json2coco.py \
+    --json_dir data/custom_kpts/train.txt \
+    --save_file data/custom_kpts/annotations-trainval/person_keypoints_train.json
+python escalator/json2coco.py \
+    --json_dir data/custom_kpts/val.txt \
+    --save_file data/custom_kpts/annotations-trainval/person_keypoints_val.json
