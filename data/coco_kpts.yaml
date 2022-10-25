@@ -8,3 +8,6 @@ test: ./data/coco_kpts/test-dev2017.txt  # 20288 of 40670 images, submit to http
 nc: 1
 
 names: [ 'person']
+
+train-annotations: ./data/coco_kpts/annotations/person_keypoints_train2017.json
+val-annotations: ./data/coco_kpts/annotations/person_keypoints_val2017.json

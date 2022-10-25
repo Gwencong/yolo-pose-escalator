@@ -8,3 +8,6 @@ test: ./data/custom_kpts/test.txt  # 20288 of 40670 images, submit to https://co
 nc: 1
 
 names: [ 'person']
+
+train-annotations: ./data/custom_kpts/annotations-trainval/person_keypoints_train.json
+val-annotations: ./data/custom_kpts/annotations-trainval/person_keypoints_val.json
