@@ -116,7 +116,7 @@ if __name__ == '__main__':
                           input_names=input_names, output_names=output_names,
                           do_constant_folding=True if device.type == 'cpu' else False,
                           dynamic_axes={'input': {0: 'batch', 2: 'height', 3: 'width'},  # size(1,3,640,640)
-                                        'output': {0: 'batch', 2: 'anchors'}} if opt.dynamic else None)
+                                        'output': {0: 'batch', 1: 'anchors'}} if opt.dynamic else None)
 
         # Checks
         model_onnx = onnx.load(f)  # load onnx model

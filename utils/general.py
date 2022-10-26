@@ -601,6 +601,44 @@ def oks_iou_fast(kpt_dts, kpt_gts, box_dts, box_gts, scores=None, gt_area=None, 
     ious = torch.where(nums>0,ious,torch.zeros_like(ious,device=device))
     return ious
 
+def oks_iou_one2one(g, d, a_g, a_d, sigmas=None, vis_thr=None):
+    """Calculate oks ious.
+    Args:
+        g: Ground truth keypoints. [N,51]
+        d: Detected keypoints.     [N,51]
+        a_g: Area of the ground truth object.   [N,1]
+        a_d: Area of the detected object.       [N,1]
+        sigmas: standard deviation of keypoint labelling.
+        vis_thr: threshold of the keypoint visibility.
+    Returns:
+        list: The oks ious.
+    """
+    if sigmas is None:
+        sigmas = torch.Tensor([
+            .26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07,
+            .87, .87, .89, .89
+        ]) / 10.0
+    vars = ((sigmas * 2)**2).reshape(1,-1).to(g.device)
+    xg = g[:,0::3]  # [N,17]
+    yg = g[:,1::3]
+    vg = g[:,2::3]
+    
+    xd = d[:, 0::3] # [N,17]
+    yd = d[:, 1::3]
+    vd = d[:, 2::3]
+    dx = xd - xg
+    dy = yd - yg
+    e = (dx**2 + dy**2) / vars / ((a_g*0.6) / 2 + 1e-9) / 2
+    if vis_thr is not None:
+        mask = torch.bitwise_and(vg > vis_thr, vd > vis_thr).float()
+        mask = torch.where(torch.all(mask==0,dim=-1,keepdim=True),torch.ones_like(mask),mask)
+    else:
+        mask = torch.ones_like(mask.shape)
+    num_vis = torch.sum(mask,-1)
+    ious = torch.where(num_vis>0,torch.sum(torch.exp(-e)*mask,-1) / num_vis,torch.zeros_like(num_vis))
+    assert torch.bitwise_and(ious<=1,ious>=0).sum() == len(ious),f'value out of range [0,1]'
+    return ious
+
 
 def wh_iou(wh1, wh2):
     # Returns the nxm IoU matrix. wh1 is nx2, wh2 is mx2
