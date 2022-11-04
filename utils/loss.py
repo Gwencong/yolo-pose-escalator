@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from utils.general import bbox_iou
+from utils.general import bbox_iou,oks_iou_one2one
 from utils.torch_utils import is_parallel
 
 
@@ -150,8 +150,19 @@ class ComputeLoss:
                     kpt_loss_factor = (torch.sum(kpt_mask != 0) + torch.sum(kpt_mask == 0))/torch.sum(kpt_mask != 0)
                     # lkpt += kpt_loss_factor*((1 - torch.exp(-d/(s*(4*sigmas**2)+1e-9)))*kpt_mask).mean()
                     lkpt += kpt_loss_factor*((1 - torch.exp(-d/(2*(s*sigmas)**2+1e-9)))*kpt_mask).mean()
+
+                    grid_x = gi[:,None]
+                    grid_y = gj[:,None]
+                    pkpt_xys = torch.stack([pkpt_x+grid_x,pkpt_y+grid_y,pkpt_score.sigmoid()],-1).reshape(-1,51)
+                    tkpt_xys = torch.stack([tkpt[i][:,0::2]+grid_x,tkpt[i][:,1::2]+grid_y,kpt_mask.float()],-1).reshape(-1,51)
+                    a_g = (tbox[i][:,2]*tbox[i][:,3])[:,None]
+                    a_d = (pbox[:,2]*pbox[:,3])[:,None]
+                    kpt_iou = oks_iou_one2one(tkpt_xys,pkpt_xys,a_g,a_d,vis_thr=0.1)
+                    kpt_iou = kpt_iou.detach().clamp(0).type(tobj.dtype)
                 # Objectness
-                tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
+                # tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)  # iou ratio
+                box_iou = (1.0 - self.gr) + self.gr * iou.detach().clamp(0).type(tobj.dtype)
+                tobj[b, a, gj, gi] = box_iou if not self.kpt_label else box_iou*kpt_iou
 
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)
